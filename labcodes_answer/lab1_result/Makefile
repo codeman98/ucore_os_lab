@@ -220,7 +220,7 @@ gdb: $(UCOREIMG)
 debug: $(UCOREIMG)
 	$(V)$(QEMU) -S -s -parallel stdio -hda $< -serial null &
 	$(V)sleep 2
-	$(V)$(TERMINAL)  -e "cgdb -q -x tools/gdbinit"
+	$(V)$(TERMINAL)  -e "gdb -q -x tools/gdbinit --"
 	
 debug-nox: $(UCOREIMG)
 	$(V)$(QEMU) -S -s -serial mon:stdio -hda $< -nographic &

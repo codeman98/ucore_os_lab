@@ -42,10 +42,14 @@ seta20.2:
     movb $0xdf, %al                                 # 0xdf -> port 0x60
     outb %al, $0x60                                 # 0xdf = 11011111, means set P2's A20 bit(the 1 bit) to 1
 
+
     # Switch from real to protected mode, using a bootstrap GDT
     # and segment translation that makes virtual addresses
     # identical to physical addresses, so that the
     # effective memory map does not change during the switch.
+    # 使用bootstrap中的GDT将OS从实模式切换到保护模式并且
+    # 此时段的转换机制使得虚拟地址和物理地址相同,所以有效
+    # 的内存映射在转换期间不会失效
     lgdt gdtdesc
     movl %cr0, %eax
     orl $CR0_PE_ON, %eax
