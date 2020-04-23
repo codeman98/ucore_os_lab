@@ -257,6 +257,7 @@ read_eip(void) {
 /* *
  * print_stackframe - print a list of the saved eip values from the nested 'call'
  * instructions that led to the current point of execution
+ * 打印被嵌套调用的call指令保存的当前执行点的eip值 
  *
  * The x86 stack pointer, namely esp, points to the lowest location on the stack
  * that is currently in use. Everything below that location in stack is free. Pushing
@@ -302,5 +303,21 @@ print_stackframe(void) {
       *           NOTICE: the calling funciton's return addr eip  = ss:[ebp+4]
       *                   the calling funciton's ebp = ss:[ebp]
       */
+    uint32_t ebp = read_ebp();
+    uint32_t eip = read_eip();
+    for (uint32_t count = 0; count < STACKFRAME_DEPTH; count++){
+        if(ebp == 0){
+            break;
+        }
+        cprintf("ebp:0x%08x eip:0x%08x args:", ebp, eip);
+        for (uint32_t i = 0; i < 4; i++) {
+            cprintf(" 0x%08x",((uint32_t *) (ebp + 8 + 4 * i))[0]);
+        }
+        cprintf("\n");
+        print_debuginfo(eip - 1);
+        /* 模拟出栈行为？ */
+        ebp = ((uint32_t *)ebp)[0];
+        eip = ((uint32_t *)(ebp + 4))[0];
+    }
 }
 

@@ -69,7 +69,7 @@ protcseg:
     movw %ax, %gs                                   # -> GS
     movw %ax, %ss                                   # -> SS: Stack Segment
 
-    # Set up the stack pointer and call into C. The stack region is from 0--start(0x7c00)
+    # Set up the stack pointer and call into C. The stack region is from 0--start(0x7c00Set up the stack pointer and call into C. The stack region is from 0--start(0x7c)
     movl $0x0, %ebp
     movl $start, %esp
     call bootmain

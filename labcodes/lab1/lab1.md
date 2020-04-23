@@ -288,4 +288,262 @@ protcseg:
 ```
 
 ---
+## [练习4]
 
+##### 通过阅读 bootmain.c，了解 bootloader 如何加载 ELF 文件。
+##### 通过分析源代码和通过 qemu 来运行并调试 bootloader&OS。
+##### (提示：可阅读“硬盘访问概述”，“ELF 执行文件格式概述”这两小节)
+---
+0.补充的内容
+```
+(1)CHS(Cylinder/Head/Sector)与LBA
+扇区编号: 给最上方的盘面的最里面的磁道的某个扇区编号为0,然后
+    在对应的柱面上绕同一层依次编号,
+    移动到下次盘面绕同一层依次编号,
+    等该柱面扇区编号完成,
+    移动到外一层的柱面重复上述过程。
+那么LBA就是将CHS的编号转换成上述编号。
+
+```
+
+1. bootloader 如何读取硬盘扇区的？
+```C
+    /**
+      * secno:扇区号
+      * dst:  存储读取到的数据
+      */
+    //1.等待磁盘准备好
+    waitdisk();
+        {   
+            /* inb读取,查询是否是忙状态*/
+            while ((inb(0x1F7) & 0xC0) != 0x40)
+            /* do nothing */;
+        }
+
+    //2.初始化参数,outb是写入
+    outb(0x1F2, 1);                         // 读一个扇区
+    /**以下是将扇区号转存到I/O地址
+      *因为所有的 IO 操作是通过 CPU 访问硬盘的 IO 地址寄存器完成。
+      */
+    outb(0x1F3, secno & 0xFF);              
+    outb(0x1F4, (secno >> 8) & 0xFF);
+    outb(0x1F5, (secno >> 16) & 0xFF);
+    outb(0x1F6, ((secno >> 24) & 0xF) | 0xE0);
+    // cmd 0x20 - 表示从0x1f0端口读数据
+    outb(0x1F7, 0x20);                      
+
+    // 等待磁盘准备好
+    waitdisk();
+
+    // 读一个扇区到dst
+    insl(0x1F0, dst, SECTSIZE / 4);
+
+```
+
+2. bootloader 是如何加载 ELF 格式的 OS？
+```C
+ELFHDR:0x10000
+    // 从磁盘读取第一页,4K/页
+    readseg((uintptr_t)ELFHDR, SECTSIZE * 8, 0);
+
+    // 判断ELF是否有效
+    if (ELFHDR->e_magic != ELF_MAGIC) {
+        goto bad;
+    }
+
+    struct proghdr *ph, *eph;
+
+    // 加载除ph flags之外的每一个程序段
+    ph = (struct proghdr *)((uintptr_t)ELFHDR + ELFHDR->e_phoff);
+    eph = ph + ELFHDR->e_phnum;
+    for (; ph < eph; ph ++) {
+        readseg(ph->p_va & 0xFFFFFF, ph->p_memsz, ph->p_offset);
+    }
+
+    // 从ELF header 调用 entry point 
+    // note: does not return
+    ((void (*)(void))(ELFHDR->e_entry & 0xFFFFFF))();
+
+bad:
+    outw(0x8A00, 0x8A00);
+    outw(0x8A00, 0x8E00);
+
+    /* do nothing */
+    while (1);
+
+```
+3. 调试bootloader&OS  
+    (1) 调试目的:
+    ```
+        i. 验证读磁盘扇区的操作
+        ii.验证对bootloader对ELF格式OS的加载    
+    ```
+    (2) 调试步骤:
+    ```
+        i. gdb连接qmue后,加载符号表obj/bootmain.o
+        ii.在bootmain处设置断点后continue进入bootmain开始调试
+        key:磁盘扇区操作中观察outb、insl以及初始化参数
+            验证加载过程(其实我也不知道看什么):
+                读第一页的时候向端口写入了什么数据?
+                如何加载ELF程序段?
+                如何调用entry?装载完成后进入0x100000,
+                也就是kernel_init的地址
+
+    ```
+    (3) 调试过程:
+        ![进入bootmain](image/bootmain_begin.png)
+
+        ![查看读第一页]() 
+         
+        ![观察加载程序段]()
+
+        
+    (4) 坑
+        i.Could not find ELF base! 
+            似乎不用管他,而且我也没找到合适的解决方法 
+        ii.我检验到向端口写入的数据和预期的不同,虽然汇编是预想的
+            似乎我对outb的理解有偏差?
+            ![outb并没有向地址填入预期数据](image/outb_question.png)
+        iii.突然发现其实根本就不用怎么debug
+            因为代码比较简单，我基本都懂的,跑一遍就是为了确认一下
+            但其实也看不出什么内容,傻了,以后不能这样做Lab,有点浪费
+---
+
+## [练习5]
+#### 我们需要在 lab1 中完成 kdebug.c 中函数 print_stackframe 的实现，
+#### 可以通过函数 print_stackframe 来跟踪函数调用堆栈中记录的返回地址
+
+* ##### 注意事项
+
+##### 可阅读小节“函数堆栈”，了解编译器如何建立函数调用关系的。  
+##### 在完成 lab1 编译后，查看 lab1/obj/bootblock.asm，  
+##### 了解 bootloader 源码与机器码的语句和地址等的对应关系；  
+
+* ##### 补充材料
+
+##### 由于显示完整的栈结构需要解析内核文件中的调试符号，较为复杂和繁琐    
+##### 代码有一些辅助函数可以使用。例如可以通过调用print_debuginfo完成
+##### 查找对应函数名并打印至屏幕的功能。具体可以参见 kdebug.c 代码中的注释。
+
+1. 关键
+```
+    了解栈帧
+    如何获取EIP?
+```
+
+2. 还不是很明确题目的意思,先打印运行一下看看效果
+
+```C
+    /* version 1.0 */
+    uint32_t ebp = read_ebp();
+    uint32_t eip = read_eip();
+    for (uint32_t count = 0; count < STACKFRAME_DEPTH; count++){
+        cprintf("ebp:0x%08x eip:0x%08x args:", ebp, eip);
+        for (uint32_t i = 0; i < 4; i++) {
+            uint32_t *ptr =(uint32_t *) (ebp + 8 + 4 * i);
+            cprintf(" 0x%08x",ptr[0]);
+        }
+        cprintf("\n");
+        print_debuginfo(eip - 1);
+        /* 还有要补充的 */
+    }
+```
+![得到一个基本的输出](image/base_output.png)
+
+3. 那么应该就是还要补充一段模拟栈帧行为的代码
+
+```C
+    /* version 2.0 */
+    uint32_t ebp = read_ebp();
+    uint32_t eip = read_eip();
+    for (uint32_t count = 0; count < STACKFRAME_DEPTH; count++){
+        if(ebp == 0){
+            break;
+        }
+        cprintf("ebp:0x%08x eip:0x%08x args:", ebp, eip);
+        for (uint32_t i = 0; i < 4; i++) {
+            cprintf(" 0x%08x",((uint32_t *) (ebp + 8 + 4 * i))[0]);
+        }
+        cprintf("\n");
+        print_debuginfo(eip - 1);
+        /* 模拟出栈行为？ */
+        ebp = ((uint32_t *)ebp)[0];
+        eip = ((uint32_t *)(ebp + 4))[0];
+    }
+```
+![得到和result差不多的结果--应该是还没有做完所有练习,导致指令有点出入?](image/extern_output.png)
+
+## [练习6]
+
+* #### 注意事项
+####  除了系统调用中断(T_SYSCALL)使用陷阱门描述符且权限为用户态权限以外，其它中断均使用
+####  特权级(DPL)为０的中断门描述符，权限为内核态权限；而 ucore 的应用程序处于特权级３，
+####  需要采用｀ int 0x80`指令操作（这种方式称为软中断，软件中断，Tra 中断，在 lab5 会碰到）
+####  来发出系统调用请求，并要能实现从特权级３到特权级０的转换，所以系统调用中断(T_SYSCALL)
+####  所对应的中断门描述符中的特权级（DPL）需要设置为３。
+
+##### [练习6.1] 中断描述符表中一个表项占多少字节？其中哪几位代表中断处理代码的入口？
+
+```
+从结构体中不难发现,中断描述符表中一个表项8字节,其中前16位是低地址,17-32位是段选择符,最后16位是高地址,  
+        ss:off_31_16 << 16 + off_15_0 = 入口
+```
+
+```C 
+    /* kern/mm/mmu.h */
+    struct gatedesc
+    {
+        unsigned gd_off_15_0 : 16;  // low 16 bits of offset in segment
+        unsigned gd_ss : 16;        // segment selector
+        unsigned gd_args : 5;       // # args, 0 for interrupt/trap gates
+        unsigned gd_rsv1 : 3;       // reserved(should be zero I guess)
+        unsigned gd_type : 4;       // type(STS_{TG,IG32,TG32})
+        unsigned gd_s : 1;          // must be 0 (system)
+        unsigned gd_dpl : 2;        // descriptor(meaning new) privilege level
+        unsigned gd_p : 1;          // Present
+        unsigned gd_off_31_16 : 16; // high bits of offset in segment
+    }
+```
+
+##### [练习6.2]请编程完善 kern/trap/trap.c 中对中断向量表进行初始化的函数 idt_init。在 idt_init 函数中,  
+##### 依次对所有中断入口进行初始化。使用 mmu.h 中的 SETGATE 宏，填充 idt 数组内容。  
+##### 每个中断的入口由 tools/vectors.c 生成，使用 trap.c 中声明的 vectors 数组即可。  
+0. 补充
+``` 
+    (1)定位中断程序
+        i.处理器通过访问IDTR得到IDT基地址和界限
+        ii.通过IDT基地址+中断向量*8访问门描述符
+        iii.根据描述符的"段选择子"访问"代码段描述符"取得段基址
+        iiii.根据描述符中的偏移量与段基址相加定位代码段中的中断处理程序
+
+```
+
+1. 了解SETGATE宏
+```
+    SETGATE(gate, istrap, sel, off, dpl)
+    gate对应idt[],off已经由vectors[],那么sel的值应该是多少?
+    由定位中断程序的过程可以知道:需要通过sel访问代码段描述符,而代码段描述符存储在GDT/LDT中的.text段中
+    通过查找文件发现memlayout.h中定义了全局描述符GDT,其中GD_KTEXT就是我们要找的sel
+```
+2. 填充Idt且lidt(设定idt的起始地址)
+```C
+    extern uintptr_t __vectors[];
+    for (int i = 0; i < sizeof(idt) / sizeof(struct gatedesc); i++) {
+        SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
+    }
+    // T_SYSCALL 是用户态
+    SETGATE(idt[T_SYSCALL], 0, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
+    // 加载idt 
+    lidt(&idt_pd);
+```
+
+##### [练习6.3]请编程完善 trap.c 中的中断处理函数 trap，在对时钟中断进行处理的部分填写 trap 函数中处理时钟
+##### 中断的部分，使操作系统每遇到 100 次时钟中断后，调用 print_ticks 子程序，向屏幕上打印一行文字"100 ticks"
+1. 在trap.c的trap_dispatch中添加:
+```C
+    ticks++;
+        if(ticks == 100){
+            print_ticks();
+            ticks = 0;
+        }
+```
