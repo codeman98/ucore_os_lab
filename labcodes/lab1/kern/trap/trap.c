@@ -54,6 +54,8 @@ void idt_init(void)
     }
     // T_SYSCALL 是用户态&&陷阱门
     SETGATE(idt[T_SYSCALL], 1, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
+    // challenge_1
+    SETGATE(idt[T_SWITCH_TOK], 0,GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
     // 加载idt 
     lidt(&idt_pd);
 }
@@ -170,6 +172,55 @@ void print_regs(struct pushregs *regs)
     cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
 
+/* 借用的函数 */
+static void
+switch_to_user(void) {
+    //LAB1 CHALLENGE 1 : TODO
+    /**
+     * 触发trap:T_SWITCH_TOU
+     * 因为需要留出空间给 SS 和 ESP,所以esp-8
+     * 当执行完中断后栈需要平衡,%ebp ==> %esp
+     **/
+    asm volatile(
+        "sub $0x8,%%esp \n"
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOU));
+}
+
+static void
+switch_to_kernel(void) {
+    //LAB1 CHALLENGE 1 :  TODO
+    /**
+     * 触发trap:T_SWITCH_TOK     
+     *  
+     **/
+    asm volatile(
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOK));
+}
+
+// static void
+// print_cur_status(void) {
+//     static int round = 0;
+//     uint16_t reg1, reg2, reg3, reg4;
+//     asm volatile (
+//             "mov %%cs, %0;"
+//             "mov %%ds, %1;"
+//             "mov %%es, %2;"
+//             "mov %%ss, %3;"
+//             : "=m"(reg1), "=m"(reg2), "=m"(reg3), "=m"(reg4));
+//     cprintf("%d: @ring %d\n", round, reg1 & 3);
+//     cprintf("%d:  cs = %x\n", round, reg1);
+//     cprintf("%d:  ds = %x\n", round, reg2);
+//     cprintf("%d:  es = %x\n", round, reg3);
+//     cprintf("%d:  ss = %x\n", round, reg4);
+//     round ++;
+// }
+
 /* trap_dispatch - dispatch based on what type of trap occurred */
 static void
 trap_dispatch(struct trapframe *tf)
@@ -195,14 +246,44 @@ trap_dispatch(struct trapframe *tf)
         c = cons_getc();
         cprintf("serial [%03d] %c\n", c, c);
         break;
+    // case IRQ_OFFSET + IRQ_KBD:
+    //     c = cons_getc();
+    //     cprintf("kbd [%03d] %c\n", c, c);
+    //     break;
+    //LAB1 CHALLENGE2 :
     case IRQ_OFFSET + IRQ_KBD:
         c = cons_getc();
+        if(c == '3'){
+            switch_to_user();
+            print_trapframe(tf);
+        }else if(c == '0'){
+            switch_to_kernel();
+            print_trapframe(tf);
+        }
         cprintf("kbd [%03d] %c\n", c, c);
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
+    /**
+     * 切换到用户态需要在中断后切换到用户态运行,所以堆栈要指向用户段的堆栈
+     * 同时需要在eflags提升IOPL到3
+     **/
     case T_SWITCH_TOU:
+        if(tf->tf_cs != USER_CS){
+            tf->tf_cs = USER_CS;
+            tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
+            tf->tf_eflags |= FL_IOPL_3;
+        }
+        break;
+    /**
+     * 切换到内核态需要在中断后切换到内核态运行,所以堆栈要指向内核段的堆栈
+     * 同时需要在eflags提升IOPL到0
+     **/
     case T_SWITCH_TOK:
-        panic("T_SWITCH_** ??\n");
+        if(tf->tf_cs != KERNEL_CS){
+            tf->tf_cs = KERNEL_CS;
+            tf->tf_ds = tf->tf_es = tf->tf_ss = KERNEL_DS;
+            tf->tf_eflags &= ~FL_IOPL_MASK;
+        }
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
