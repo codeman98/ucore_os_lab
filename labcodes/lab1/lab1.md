@@ -547,3 +547,195 @@ bad:
             ticks = 0;
         }
 ```
+
+## [Challenge 1]
+##### 即增加一用户态函数（可执行一特定系统调用：获得时钟计数值）,当内核初始完毕后，可从内核态返回到用户态的函数，
+##### 而用户态的函数又通过系统调用得到内核态的服务,需写出详细的设计和分析报告。
+0. 理解
+###### 需要明白在用户态/内核态切换过程中trap_dispatch,软件需要做什么？
+###### 查阅资料发现
+* 处理程序的栈
+```
+|-------|
+|   SS  |
+|  ESP  |
+| EFLAGS| <---中断前的ESP
+|   CS  |
+|  EIP  |
+|er_code| <---中断后的ESP
+|-------|
+```
+
+* 调用trap前的准备
+```asm
+__alltraps:
+    # push registers to build a trap frame
+    # therefore make the stack look like a struct trapframe
+    pushl %ds
+    pushl %es
+    pushl %fs
+    pushl %gs
+    pushal
+
+    # load GD_KDATA into %ds and %es to set up data segments for kernel
+    movl $GD_KDATA, %eax
+    movw %ax, %ds
+    movw %ax, %es
+
+    # push %esp to pass a pointer to the trapframe as an argument to trap()
+    pushl %esp
+
+    # call trap(tf), where tf=%esp
+    call trap
+
+    # pop the pushed stack pointer
+    popl %esp
+    # return falls through to trapret...
+
+```
+
+* 从trap返回
+```
+__trapret:
+    # restore registers from stack
+    popal
+
+    # restore %ds, %es, %fs and %gs
+    popl %gs
+    popl %fs
+    popl %es
+    popl %ds
+
+    # get rid of the trap number and error code
+    addl $0x8, %esp
+    iret
+```
+
+* 需要测试的内容
+```
+    从答案可以看出,每一次状态切换后打印了cs,ds,es,ss,且ds,es,ss是一致的
+```
+
+
+1. 在trap.c的idt_init中添加:
+```C
+    SETGATE(idt[T_SWITCH_TOK], 0,GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
+```
+2. 修改trap_dispatch中的case T_SWITCH_TOU 和 T_SWITCH_TOK
+```C
+    /**
+     * 切换到用户态需要在中断后切换到用户态运行,所以堆栈要指向用户段的堆栈
+     * 同时需要在eflags提升IOPL到3
+     **/
+    if(tf->tf_cs != USER_CS){
+            tf->tf_cs = USER_CS;
+            tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
+            tf->tf_eflags |= FL_IOPL_3;
+    }
+
+    /**
+     * 切换到内核态需要在中断后切换到内核态运行,所以堆栈要指向内核段的堆栈
+     * 同时需要在eflags提升IOPL到0
+     **/
+    if(tf->tf_cs != KERNEL_CS){
+            tf->tf_cs = KERNEL_CS;
+            tf->tf_ds = tf->tf_es = tf->tf_ss = KERNEL_DS;
+            tf->tf_eflags &= ~FL_IOPL_MASK;
+    }
+
+```
+3. 再设置init.c下的两个触发函数lab1_switch_to_user和lab1_switch_to_kernel
+
+```C
+/**
+ * 其实为什么要sub $0x8,%%esp 我还不是很确定
+ **/
+
+static void
+lab1_switch_to_user(void) {
+    /**
+     * 触发trap:T_SWITCH_TOU
+     * 因为需要留出空间给 SS 和 ESP,所以esp-8
+     * 当执行完中断后栈需要平衡,%ebp ==> %esp
+     **/
+    asm volatile(
+        "sub $0x8,%%esp \n"
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOU));
+}
+
+static void
+lab1_switch_to_kernel(void) {
+    /**
+     * 触发trap:T_SWITCH_TOK     
+     *  
+     **/
+    asm volatile(
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOK));
+}
+```
+
+4. make grade评分
+![](image/challenge1_success.png)
+
+## [Challenge 2]
+##### “键盘输入 3 时切换到用户模式，键盘输入 0 时切换到内核模式”。 
+##### 基本思路是借鉴软中断(syscall 功能)的代码，并且把 trap.c 中软中断处理的设置语句拿过来。
+
+1. 键盘中断对应 IRQ_KBD,直接在case IRQ_OFFSET + IRQ_KBD 处修改代码
+```C
+
+/* 借用的函数 */
+static void
+switch_to_user(void) {
+    //LAB1 CHALLENGE 1 : TODO
+    /**
+     * 触发trap:T_SWITCH_TOU
+     * 因为需要留出空间给 SS 和 ESP,所以esp-8
+     * 当执行完中断后栈需要平衡,%ebp ==> %esp
+     **/
+    asm volatile(
+        "sub $0x8,%%esp \n"
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOU));
+}
+
+static void
+switch_to_kernel(void) {
+    //LAB1 CHALLENGE 1 :  TODO
+    /**
+     * 触发trap:T_SWITCH_TOK     
+     *  
+     **/
+    asm volatile(
+        "int %0 \n"
+        "movl %%ebp,%%esp"
+        :
+        : "i"(T_SWITCH_TOK));
+}
+
+    case IRQ_OFFSET + IRQ_KBD:
+        c = cons_getc();
+        if(c == '3'){
+            switch_to_user();
+            print_trapframe(tf);
+        }else if(c == '0'){
+            switch_to_kernel();
+            print_trapframe(tf);
+        }
+        cprintf("kbd [%03d] %c\n", c, c);
+        break;
+```
+
+2. 运行结果
+
+![print_trapframe没有输出预期结果](image/print_tf.png)
+
+![print_cur_status输出正常](image/print_cur_status.png)
