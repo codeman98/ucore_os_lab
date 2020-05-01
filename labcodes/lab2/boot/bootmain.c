@@ -78,6 +78,7 @@ readseg(uintptr_t va, uint32_t count, uint32_t offset) {
     // We'd write more to memory than asked, but it doesn't matter --
     // we load in increasing order.
     for (; va < end_va; va += SECTSIZE, secno ++) {
+        //read a single sector
         readsect((void *)va, secno);
     }
 }

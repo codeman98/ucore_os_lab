@@ -7,6 +7,7 @@ OBJPREFIX	:= __objs_
 listf = $(filter $(if $(2),$(addprefix %.,$(2)),%),\
 		  $(wildcard $(addsuffix $(SLASH)*,$(1))))
 
+
 # get .o obj files: (#files[, packet])
 toobj = $(addprefix $(OBJDIR)$(SLASH)$(if $(2),$(2)$(SLASH)),\
 		$(addsuffix .o,$(basename $(1))))
@@ -14,7 +15,9 @@ toobj = $(addprefix $(OBJDIR)$(SLASH)$(if $(2),$(2)$(SLASH)),\
 # get .d dependency files: (#files[, packet])
 todep = $(patsubst %.o,%.d,$(call toobj,$(1),$(2)))
 
+# 给参数1加一个前缀bin/
 totarget = $(addprefix $(BINDIR)$(SLASH),$(1))
+
 
 # change $(name) to $(OBJPREFIX)$(name): (#names)
 packetname = $(if $(1),$(addprefix $(OBJPREFIX),$(1)),$(OBJPREFIX))
@@ -35,6 +38,7 @@ $$(foreach f,$(1),$$(eval $$(call cc_template,$$(f),$(2),$(3),$(4))))
 endef
 
 # add files to packet: (#files, cc[, flags, packet, dir])
+# 
 define do_add_files_to_packet
 __temp_packet__ := $(call packetname,$(4))
 ifeq ($$(origin $$(__temp_packet__)),undefined)
@@ -79,6 +83,7 @@ endef
 cc_compile = $(eval $(call do_cc_compile,$(1),$(2),$(3),$(4)))
 
 # add files to packet: (#files, cc[, flags, packet, dir])
+# 
 add_files = $(eval $(call do_add_files_to_packet,$(1),$(2),$(3),$(4),$(5)))
 
 # add objs to packet: (#objs, packet)
@@ -87,7 +92,9 @@ add_objs = $(eval $(call do_add_objs_to_packet,$(1),$(2)))
 # add packets and objs to target (target, #packes, #objs, cc, [, flags])
 create_target = $(eval $(call do_create_target,$(1),$(2),$(3),$(4),$(5)))
 
+#给文件批量增加前缀
 read_packet = $(foreach p,$(call packetname,$(1)),$($(p)))
+
 
 add_dependency = $(eval $(1): $(2))
 

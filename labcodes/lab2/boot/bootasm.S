@@ -8,7 +8,6 @@
 .set PROT_MODE_CSEG,        0x8                     # kernel code segment selector
 .set PROT_MODE_DSEG,        0x10                    # kernel data segment selector
 .set CR0_PE_ON,             0x1                     # protected mode enable flag
-.set SMAP,                  0x534d4150
 
 # start address should be 0:7c00, in real mode, the beginning address of the running bootloader
 .globl start
@@ -43,29 +42,14 @@ seta20.2:
     movb $0xdf, %al                                 # 0xdf -> port 0x60
     outb %al, $0x60                                 # 0xdf = 11011111, means set P2's A20 bit(the 1 bit) to 1
 
-probe_memory:
-    movl $0, 0x8000
-    xorl %ebx, %ebx
-    movw $0x8004, %di
-start_probe:
-    movl $0xE820, %eax
-    movl $20, %ecx
-    movl $SMAP, %edx
-    int $0x15
-    jnc cont
-    movw $12345, 0x8000
-    jmp finish_probe
-cont:
-    addw $20, %di
-    incl 0x8000
-    cmpl $0, %ebx
-    jnz start_probe
-finish_probe:
 
     # Switch from real to protected mode, using a bootstrap GDT
     # and segment translation that makes virtual addresses
     # identical to physical addresses, so that the
     # effective memory map does not change during the switch.
+    # 使用bootstrap中的GDT将OS从实模式切换到保护模式并且
+    # 此时段的转换机制使得虚拟地址和物理地址相同,所以有效
+    # 的内存映射在转换期间不会失效
     lgdt gdtdesc
     movl %cr0, %eax
     orl $CR0_PE_ON, %eax
@@ -85,7 +69,7 @@ protcseg:
     movw %ax, %gs                                   # -> GS
     movw %ax, %ss                                   # -> SS: Stack Segment
 
-    # Set up the stack pointer and call into C. The stack region is from 0--start(0x7c00)
+    # Set up the stack pointer and call into C. The stack region is from 0--start(0x7c00Set up the stack pointer and call into C. The stack region is from 0--start(0x7c)
     movl $0x0, %ebp
     movl $start, %esp
     call bootmain
@@ -94,7 +78,6 @@ protcseg:
 spin:
     jmp spin
 
-.data
 # Bootstrap GDT
 .p2align 2                                          # force 4 byte alignment
 gdt:
