@@ -3,7 +3,10 @@
 #include <stab.h>
 #include <stdio.h>
 #include <string.h>
+#include <sync.h>
 #include <kdebug.h>
+#include <kmonitor.h>
+#include <assert.h>
 
 #define STACKFRAME_DEPTH 20
 
@@ -257,7 +260,7 @@ read_eip(void) {
 /* *
  * print_stackframe - print a list of the saved eip values from the nested 'call'
  * instructions that led to the current point of execution
- * 打印被嵌套调用的call指令保存的当前执行点的eip值 
+ * 打印被嵌套调用的call指令保存的当前执行点的eip�
  *
  * The x86 stack pointer, namely esp, points to the lowest location on the stack
  * that is currently in use. Everything below that location in stack is free. Pushing
@@ -315,7 +318,7 @@ print_stackframe(void) {
         }
         cprintf("\n");
         print_debuginfo(eip - 1);
-        /* 模拟出栈行为？ */
+        /* 模拟出栈行为�*/
         ebp = ((uint32_t *)ebp)[0];
         eip = ((uint32_t *)(ebp + 4))[0];
     }

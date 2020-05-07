@@ -9,6 +9,7 @@
 #include <intr.h>
 #include <pmm.h>
 #include <kmonitor.h>
+
 int kern_init(void) __attribute__((noreturn));
 void grade_backtrace(void);
 static void lab1_switch_test(void);
@@ -86,8 +87,8 @@ lab1_switch_to_user(void) {
     //LAB1 CHALLENGE 1 : TODO
     /**
      * 触发trap:T_SWITCH_TOU
-     * 因为需要留出空间给 SS 和 ESP,所以esp-8
-     * 当执行完中断后栈需要平衡,%ebp ==> %esp
+     * 因为需要留出空间给 SS �ESP,所以esp-8
+     * 当执行完中断后栈需要平�%ebp ==> %esp
      **/
     asm volatile(
         "sub $0x8,%%esp \n"
