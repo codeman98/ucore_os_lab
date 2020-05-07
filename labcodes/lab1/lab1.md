@@ -305,6 +305,15 @@ protcseg:
 那么LBA就是将CHS的编号转换成上述编号。
 
 ```
+0. 一点补充
+
+```
+    readseg(uintptr_t va, uint32_t count, uint32_t offset) 会从内核的
+    offset位置读count个字节,放置到va所对应的虚拟内存位置,因为offset不一定
+    对应到扇区的头部，然后读取的时候是按照整个扇区来读的，所以va对应地也要
+    进行一个偏移。(假设不进行偏移，那么原va处开始的一小段内容就可能不是一
+    开始希望的offset处的内容，而是包含了扇区头部到offset的一段)
+```
 
 1. bootloader 如何读取硬盘扇区的？
 ```C

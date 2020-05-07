@@ -154,6 +154,7 @@ default_free_pages(struct Page *base, size_t n)
 }
 
 ```
+![测试通过](image\first_fit_success.png)
 
 ## [练习2]
 
