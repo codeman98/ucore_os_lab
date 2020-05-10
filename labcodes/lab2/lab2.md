@@ -156,11 +156,60 @@ default_free_pages(struct Page *base, size_t n)
 ```
 ![测试通过](image\first_fit_success.png)
 
-## [练习2]
+## [练习2] 实现寻找虚拟地址对应的页表项
 
-## [练习3]
+0. 页表的重要内容
+![](image\key_page1.png)
+![](image\key_page2.png)
 
-## [Challenge 1]
+1. 修改get_pte()
+```C
+pte_t *
+get_pte(pde_t *pgdir, uintptr_t la, bool create) {
+    pde_t *pde = &pgdir[PDX(la)];               //找到相应的pde
+    if(!(*pde & PTE_P)){                        //若页面无效
+        if(create == NULL) return NULL;         //create为0表示不创建,此时返回null
+        struct Page *page = alloc_page();       //create为1则分配一个页面
+        if(page == NULL) return NULL;           //内存不足retunr null
+        set_page_ref(page, 1);                  //随后设置ref为1
+        pde_t *pa = page2pa(page);              //并获取页面对应的物理地址
+        pde_t *va = KADDR(pa);                  //得到对应的内核虚地址
+        memset(va, 0, PGSIZE);                  //初始化页面
+        *pde = pa | PTE_P | PTE_W | PTE_U;      //将pa放入pde中并设置标志位
+    }
+    return &pde[PTX(la)];                       //返回pte所在的内核虚地址
+}
+```
 
-## [Challenge 2]
+2. 请描述页目录项和页表项中每个组成部分的含义以及对 ucore 而言的潜在用处。
+    答:如图可知
+
+3. 如果 ucore 执行过程中访问内存，出现了页访问异常，请问硬件要做哪些事情?
+    答:访问内存异常后，要压入当前的线性地址到cr2中，然后执行中断服务例程。
+
+## [练习3] 释放某虚地址所在的页并取消对应二级页表项的映射  
+当释放一个包含某虚地址的物理内存页时，需要让对应此物理内存页的管理数据结构 Page 做相关的清除处理，
+使得此物理内存页成为空闲；另外还需把表示虚地址与物理地址对应关系的二级页表项清除。  
+
+0. 总述
+    比练习2简单多了,按照流程来就行
+
+1. 修改page_remove_pte
+```C
+    static inline void
+page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
+    if((pgdir[PDX(la)] & PTE_P)&&(*ptep & PTE_P)){      //是否有效
+        struct Page *page = pte2page(*ptep);            //找到对应页面
+        page_ref_dec(page);                             //引用自减
+        if(page->ref==0){                               //引用为0
+            free_page(page);                            //释放页面
+        }
+        tlb_invalidate(pgdir, la);                      //刷新tlb
+        *ptep = NULL;                                   //清空页表项
+    }
+}
+```
+## [Challenge 1] buddy system（伙伴系统）分配算法
+
+## [Challenge 2] 任意大小的内存单元 slub 分配算法
 
