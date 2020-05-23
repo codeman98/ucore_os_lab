@@ -4,6 +4,8 @@ INTRODUCTION
 
 NEWS
 ===========
+- 2020.5.23 完成lab2 challenge1  
+            时间太紧,抓紧半个月之内结束之后的lab,challenge可以放弃
 - 2020.5.10 完成lab2 练习2,3
 - 2020.5.7  完成lab2 练习0,1 编程菜鸡&考研选手&拖延症患者太难了
 - 2020.4.28 完成lab1 challenge1、2  
