@@ -355,12 +355,377 @@ default_check(void)
     assert(total == 0);
 }
 
-const struct pmm_manager default_pmm_manager = {
-    .name = "default_pmm_manager",
-    .init = default_init,
-    .init_memmap = default_init_memmap,
-    .alloc_pages = default_alloc_pages,
-    .free_pages = default_free_pages,
-    .nr_free_pages = default_nr_free_pages,
-    .check = default_check,
+/*----------------------------------------------------------------------------*/
+/*------------------------challenge 1 buddy_system----------------------------*/
+/*----------------------------------------------------------------------------*/
+
+//Data Structure Flags
+
+struct buddy2{
+    unsigned size;               //表明管理内存的总单元数目,在初始化时分配
+    unsigned longest[0];    //表明所对应的内存块的空闲单位
 };
+
+struct buddy2 *buddy_manager;
+struct Page   *alloc_page_base;     //实际分配页面的起始页面地址
+struct Page   *manage_base;         //控制信息存储页面
+
+//relation operator
+#define buddy_left_child(i)    ((i+1)*2-1)    
+#define buddy_right_child(i)   ((i+1)*2)
+#define buddy_parent(i)        (i==0?0:(i-1)/2)
+
+//assistants
+#define IS_POWER_OF_2(i)       ((i!=0) && (((i-1)&i)==0)) 
+#define MAX(a,b)               ((a)>=(b)?(a):(b))
+
+unsigned round_down(unsigned n){ //n至少为1;
+    unsigned i = 1;
+    for(;n >> i;i++);
+    return 1 << (i-1);
+}
+unsigned round_up(unsigned n){  //n不能超过0x8000 0000;
+    unsigned i = 1;
+    for(;n >> i;i++);
+    return 1 << i;
+}
+
+
+static void buddy_init(){
+    //不需要做什么东西,只是为了适应接口
+}
+
+/*--------------------------------init_buddy_manager begin--------------------------------------*/
+static void
+init_buddy_manager(struct Page *base, size_t n){
+    if(!IS_POWER_OF_2(n)) n = round_down(n);
+    buddy_manager->size = n;
+    unsigned node_count = 2 * buddy_manager->size - 1;
+    unsigned size_count = (node_count+1) * sizeof(unsigned);
+    buddy_manager = page2kva(base);
+    manage_base = base;
+    alloc_page_base = base + ((size_count - 1) / PGSIZE + 1);
+
+    unsigned node_size = n * 2;
+    for(unsigned i = 0; i < node_count; i++){
+        if(!IS_POWER_OF_2(i))
+            node_size /= 2;
+        buddy_manager->longest[i] = node_size;
+    }
+}
+static void
+buddy_init_memmap(struct Page *base, size_t n)
+{
+    assert(n > 0);                     //n=2^k; k>=0
+    struct Page *p = base;
+    for (; p != base + n; p++)
+    {
+        //非保留页才可以被分配使用
+        assert(PageReserved(p));
+        //设置页属性
+        p->flags = p->property = 0;
+        //空闲页: ref位为0
+        set_page_ref(p, 0);
+    }
+    
+    //buddy初始化
+    init_buddy_manager(base,n);
+}
+/*--------------------------------init_buddy_manager end--------------------------------------*/
+
+
+/*--------------------------------buddy_alloc_pages begin--------------------------------------*/
+static struct Page *
+buddy_alloc_pages(size_t n)
+{
+    assert(n > 0);
+    if(!IS_POWER_OF_2(n)) n = round_up(n);
+    if(n > buddy_manager->longest[0]) return NULL; 
+
+    //offset最终取low,high=n充当边界,同时保证计算low时向上取整
+    unsigned offset, low = 0, high = n;
+    
+    //找到n=buddy_manager->longest[i],同时二分计算offset
+    unsigned i = 0;
+    while(n != buddy_manager->longest[i]){
+        if(n<=buddy_manager->longest[buddy_left_child(i)]){
+            i = buddy_left_child(i);
+            low = (high + low)/2;
+        }else{
+            i = buddy_right_child(i);
+            high = (high + low)/2;
+        }
+    }
+    //找到实际分配的下标位置
+    while(buddy_manager->longest[i] != 1){
+        if(n == buddy_manager->longest[buddy_left_child(i)]){
+            i = buddy_left_child(i);
+            low = (high + low)/2;
+        }
+        else if(n == buddy_manager->longest[buddy_right_child(i)]){
+            i = buddy_right_child(i);
+            high = (high + low)/2;
+        }
+        else
+            break;
+    }
+    offset = low;
+
+    buddy_manager->longest[i] = 0;
+    //自底往上更改longest[]
+    unsigned j = i;
+    while(j){
+        j = buddy_parent(j);
+        buddy_manager->longest[j] = MAX(buddy_manager->longest[buddy_left_child(j)],
+                                    buddy_manager->longest[buddy_right_child(j)]);
+    }
+
+    /*获取page*/
+    struct Page *page = alloc_page_base + offset;   
+    //页的控制信息是否需要更新？
+    //直接对page进行更改
+    // SetPageProperty(page);
+    // ClearPageProperty(page);
+    return page;
+}
+/*--------------------------------buddy_alloc_pages end--------------------------------------*/
+
+/*--------------------------------buddy_free_pages begin--------------------------------------*/
+static void
+buddy_free_pages(struct Page *base, size_t n)
+{
+    assert(n > 0 && n <= buddy_manager->size);
+    if(!IS_POWER_OF_2(n)) n = round_up(n);
+    unsigned offset = base - alloc_page_base;
+    unsigned i = offset;
+    /**
+     * 已经分配的是当前分支可分配的最深的结点,其子结点不可能被分配。
+     * 如果两个子节点都是满的,父节点归满,满的条件必须是子节点当前大小==node_size
+     * 否则父节点值为最大子结点中值较大的一个;
+     **/
+    buddy_manager->longest[i] = n;
+    size_t node_size = n;
+    while(i){
+        i = buddy_parent(i);
+        if(node_size == n){
+            if(buddy_manager->longest[buddy_left_child(i)] ==
+                buddy_manager->longest[buddy_right_child(i)])
+                {
+                    buddy_manager->longest[i] = 2*n;
+                    n*=2;
+                }
+        }
+        else{
+            buddy_manager->longest[i] = MAX(buddy_manager->longest[buddy_left_child(i)],
+                                        buddy_manager->longest[buddy_right_child(i)]);
+        }
+        node_size *= 2;
+    }
+    //暂时不做页面控制信息的改变
+}
+
+static size_t
+buddy_nr_free_pages(void) {
+    return buddy_manager->size;
+}
+
+/*--------------------------------buddy_free_pages end--------------------------------------*/
+
+/*--------------------------------buddy_checks begin--------------------------------------*/
+static void
+macro_check(){  
+    //check relation operator
+    assert(buddy_left_child(0) == 1);
+    assert(buddy_left_child(1) == 3);
+    assert(buddy_left_child(2) == 5);
+    assert(buddy_right_child(0) == 2);  
+    assert(buddy_right_child(1) == 4);
+    assert(buddy_right_child(2) == 6);
+    
+    assert(buddy_parent(0) == 0);        
+    assert(buddy_parent(1) == 0);        
+    assert(buddy_parent(2) == 0);        
+    assert(buddy_parent(3) == 1);        
+    assert(buddy_parent(4) == 1);        
+    assert(buddy_parent(5) == 2);        
+    assert(buddy_parent(6) == 2);        
+
+    //check assistants
+    assert(IS_POWER_OF_2(0) == 0);       
+    assert(IS_POWER_OF_2(1) == 1);       
+    assert(IS_POWER_OF_2(0xffffffff) == 0);       
+    assert(IS_POWER_OF_2(0x80000000) == 1);
+    assert(IS_POWER_OF_2(0xf1234567) == 0);
+    assert(IS_POWER_OF_2(0x00100000) == 1);
+
+    assert(MAX(0,0) == 0);
+    assert(MAX(0xffffffff,0) == 0xffffffff);
+    assert(MAX(0,0xffffffff) == 0xffffffff);
+    assert(MAX(0xff,0xff1) == 0xff1);
+    
+    assert(round_up(0) == 1);
+    assert(round_up(1) == 1);
+    assert(round_up(0x7fffffff) == 0x80000000);
+    assert(round_up(0x80000000) == 0x80000000);
+    assert(round_up(0x01234567) == 0x02000000);
+
+    assert(round_down(1) == 1);
+    assert(round_down(0x8fffffff) == 0x80000000);
+    assert(round_down(0x80000000) == 0x80000000);
+    assert(round_down(0x01234567) == 0x01000000);
+}
+
+/**
+ * 遍历检查longest[]
+ **/
+static void
+longest_check(){
+    size_t max_parent = 2 * (buddy_manager->size - 1) - 1;
+    size_t i = 0;
+    size_t node_size = buddy_manager->size;
+    for(; i < max_parent; i++,node_size/=2){
+        size_t left = buddy_left_child(i);
+        size_t right = buddy_right_child(i);
+        if(left == right){
+           if((left << 1) ==  node_size){
+               assert(buddy_manager->longest[i] == node_size);
+           }
+        }
+        else{
+            assert(buddy_manager->longest[i] == 
+                MAX(buddy_manager->longest[left],buddy_manager->longest[right]));
+        }
+    }
+}
+
+/**
+ * 验证init后控制结构的信息是否正确
+ **/
+static void
+manager_check() {
+    unsigned i;
+    buddy_init_memmap(manage_base,1024);
+    assert(buddy_manager->size == 1024);
+    i = alloc_page_base - manage_base;
+    assert(i == 2);
+    buddy_init_memmap(manage_base,1026);
+    assert(buddy_manager->size == 1024);
+    i = alloc_page_base - manage_base;
+    assert(i == 2);
+}
+
+/**
+ * 验证alloc和free的正确性
+ **/
+static void
+alloc_check(){
+    // 前面这一段是原来的测试
+    // Build buddy system for test
+    size_t buddy_alloc_size = buddy_manager->size;
+    for (struct Page *p = manage_base; p < manage_base + 1026; p++)
+        SetPageReserved(p);
+    buddy_init();
+    buddy_init_memmap(manage_base, 1026);
+
+    // Check allocation
+    struct Page *p0, *p1, *p2, *p3;
+    p0 = p1 = p2 = NULL;
+    assert((p0 = alloc_page()) != NULL);
+    assert((p1 = alloc_page()) != NULL);
+    assert((p2 = alloc_page()) != NULL);
+    assert((p3 = alloc_page()) != NULL);
+    cprintf("p0 - base = %d, p1 - base = %d. p2 - base = %d, p3 - base = %d\n", \
+    p0 - alloc_page_base, p1 - alloc_page_base, p2 - alloc_page_base, p3 - alloc_page_base);
+    assert(p0 + 1 == p1);
+    assert(p1 + 1 == p2);
+    assert(p2 + 1 == p3);
+    assert(page_ref(p0) == 0 && page_ref(p1) == 0 && page_ref(p2) == 0 && page_ref(p3) == 0);
+
+    assert(page2pa(p0) < npage * PGSIZE);
+    assert(page2pa(p1) < npage * PGSIZE);
+    assert(page2pa(p2) < npage * PGSIZE);
+    assert(page2pa(p3) < npage * PGSIZE);
+
+
+    // Check release
+    free_page(p0);
+    free_page(p1);
+    free_page(p2);
+    cprintf("p3 - base = %d\n",  p3 - alloc_page_base);
+    assert((p1 = alloc_page()) != NULL);
+    assert((p0 = alloc_pages(2)) != NULL);
+    cprintf("p0 - base = %d, p1 - base = %d\n", p0 - alloc_page_base, p1 - alloc_page_base);
+    assert(p0 + 2 == p1);
+
+    free_pages(p0, 2);
+    free_page(p1);
+    free_page(p3);
+
+    struct Page *p;
+    assert((p = alloc_pages(4)) == p0);
+
+    //测试alloc和free
+    unsigned *testA = buddy_alloc_pages(70);
+    longest_check();
+    unsigned *testB = buddy_alloc_pages(35);
+    longest_check();
+    unsigned *testC = buddy_alloc_pages(80);
+    longest_check();
+    buddy_free_pages(testA,70);
+    longest_check();
+    unsigned *testD = buddy_alloc_pages(60);
+    longest_check();
+    unsigned *testE = buddy_alloc_pages(64);
+    unsigned *testF = buddy_alloc_pages(64);
+    buddy_free_pages(testF,64);
+    longest_check();
+    buddy_free_pages(testD,60);
+    longest_check();
+    buddy_free_pages(testB,35);
+    longest_check();
+    buddy_free_pages(testE,64);
+    longest_check();
+    buddy_free_pages(testC,80);
+    longest_check();
+    // Restore buddy system
+    for (struct Page *p = manage_base; p < manage_base + buddy_alloc_size; p++)
+        SetPageReserved(p);
+    buddy_init();
+    buddy_init_memmap(manage_base, buddy_alloc_size);
+}
+
+static void
+buddy_check()
+{
+    macro_check();
+    manager_check();
+    alloc_check();
+}
+/*--------------------------------buddy_checks end--------------------------------------*/
+
+/*--------------------------------pmm_manager begin--------------------------------------*/
+const struct pmm_manager buddy_pmm_manager = {
+    .name = "buddy_pmm_manager",
+    .init = buddy_init,
+    .init_memmap = buddy_init_memmap,
+    .alloc_pages = buddy_alloc_pages,
+    .free_pages = buddy_free_pages,
+    .nr_free_pages = buddy_nr_free_pages,
+    .check = buddy_check,
+};
+
+/*----------------------------------------------------------------------------*/
+/*------------------------challenge 1 buddy_system----------------------------*/
+/*----------------------------------------------------------------------------*/
+
+/*--------------------------------pmm_manager end--------------------------------------*/
+
+// const struct pmm_manager default_pmm_manager = {
+//     .name = "default_pmm_manager",
+//     .init = default_init,
+//     .init_memmap = default_init_memmap,
+//     .alloc_pages = default_alloc_pages,
+//     .free_pages = default_free_pages,
+//     .nr_free_pages = default_nr_free_pages,
+//     .check = default_check,
+// };

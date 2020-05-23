@@ -137,7 +137,8 @@ gdt_init(void) {
 //init_pmm_manager - initialize a pmm_manager instance
 static void
 init_pmm_manager(void) {
-    pmm_manager = &default_pmm_manager;
+    //pmm_manager = &default_pmm_manager;
+    pmm_manager = &buddy_pmm_manager;
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -354,10 +355,10 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
         struct Page *page = alloc_page();       //create为1则分配一个页面
         if(page == NULL) return NULL;           //内存不足retunr null
         set_page_ref(page, 1);                  //随后设置ref为1
-        pde_t *pa = page2pa(page);              //并获取页面对应的物理地址
+        uintptr_t pa = page2pa(page);           //并获取页面对应的物理地址
         pde_t *va = KADDR(pa);                  //得到对应的内核虚地址
         memset(va, 0, PGSIZE);                  //初始化页面
-        *pde = pa | PTE_P | PTE_W | PTE_U;      //将pa放入pde中并设置标志位
+        *pde = pa | PTE_U | PTE_W | PTE_P;      //将pa放入pde中并设置标志位
     }
     return &pde[PTX(la)];                       //返回pte所在的内核虚地址
 
